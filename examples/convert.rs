@@ -1,4 +1,4 @@
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 use std::{env, fs};
 
 #[derive(Hash, PartialEq, Eq, Serialize, Deserialize)]
@@ -27,10 +27,10 @@ fn main() {
 
     let module = if args.len() <= 1 {
         println!("Call with <input> <output>");
-        return
+        return;
     } else if args[1].ends_with(".spv") {
         let input = fs::read(&args[1]).unwrap();
-        naga::front::spirv::parse_u8_slice(&input).unwrap()
+        naga::front::spv::parse_u8_slice(&input).unwrap()
     } else if args[1].ends_with(".wgsl") {
         let input = fs::read_to_string(&args[1]).unwrap();
         naga::front::wgsl::parse_str(&input).unwrap()
@@ -43,8 +43,7 @@ fn main() {
         return;
     }
 
-    let param_path = std::path::PathBuf::from(&args[1])
-        .with_extension("ron");
+    let param_path = std::path::PathBuf::from(&args[1]).with_extension("ron");
     let params = match fs::read_to_string(param_path) {
         Ok(string) => ron::de::from_str(&string).unwrap(),
         Err(_) => Parameters::default(),
@@ -73,20 +72,19 @@ fn main() {
         let msl = msl::write_string(&module, options).unwrap();
         fs::write(&args[2], msl).unwrap();
     } else if args[2].ends_with(".spv") {
-        use naga::back::spirv;
+        use naga::back::spv;
 
-        let debug_enabled;
+        let debug_flag = args.get(3).map_or(spv::ParserFlags::DEBUG, |arg| {
+            if arg.parse().unwrap() {
+                spv::ParserFlags::DEBUG
+            } else {
+                spv::ParserFlags::NONE
+            }
+        });
 
-        if args.len() == 4 {
-            debug_enabled = args[3].parse().unwrap();
-        } else {
-            debug_enabled = true;
-        }
+        let spirv = spv::parser::Parser::new(&module.header, debug_flag).parse(&module);
 
-        let mut parser = spirv::parser::Parser::new(&module, debug_enabled);
-        let spirv = parser.parse(&module);
-
-        let mut bytes: Vec<u8> = vec![];
+        let mut bytes = Vec::with_capacity(spirv.len() * 4);
         for byte in spirv.iter() {
             let bits = byte.to_le_bytes();
             bytes.push(bits[0]);
@@ -94,7 +92,6 @@ fn main() {
             bytes.push(bits[2]);
             bytes.push(bits[3]);
         }
-
         fs::write(&args[2], bytes.as_slice()).unwrap();
     } else {
         panic!("Unknown output: {:?}", args[2]);
