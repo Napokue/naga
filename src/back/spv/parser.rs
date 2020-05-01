@@ -32,6 +32,7 @@ pub struct Parser {
     lookup_constant: FastHashMap<Word, LookupType<crate::Constant>>,
     lookup_global_variable: FastHashMap<Word, LookupType<crate::GlobalVariable>>,
     lookup_import: FastHashMap<Word, String>,
+    labels: Vec<Word>
 }
 
 impl Parser {
@@ -52,6 +53,7 @@ impl Parser {
             lookup_constant: FastHashMap::default(),
             lookup_global_variable: FastHashMap::default(),
             lookup_import: FastHashMap::default(),
+            labels: vec![]
         }
     }
 
@@ -160,7 +162,7 @@ impl Parser {
         if self.parser_flags.contains(ParserFlags::DEBUG) {
             let mut debug_instruction = Instruction::new(Op::Name);
             debug_instruction.set_result(function_id);
-            debug_instruction.add_operands(self.string_to_words(entry_point.name.as_str()));
+            debug_instruction.add_operands(self.string_to_words((&ir_module.functions[*&entry_point.function]).name.as_ref().unwrap().as_str()));
             self.debugs.push(debug_instruction);
         }
 
@@ -1055,6 +1057,7 @@ impl Parser {
                 instruction.set_result(id);
                 instruction.add_operand(left_id);
                 instruction.add_operand(right_id);
+                output.push(instruction);
                 (id, left_inner)
             }
             crate::Expression::LocalVariable(variable) => {
@@ -1154,6 +1157,7 @@ impl Parser {
                         }
                         instruction.set_result(id);
                         instruction.add_operand(operand_id);
+                        output.push(instruction);
                         (id, operand_inner)
                     }
                     _ => unimplemented!("{:?}", op),
@@ -1169,7 +1173,7 @@ impl Parser {
         function: &crate::Function,
         statement: &crate::Statement,
         output: &mut Vec<Instruction>,
-        current_block: Word,
+        label: Word,
     ) {
         match statement {
             crate::Statement::Return { value: _ } => match function.return_type {
@@ -1196,31 +1200,33 @@ impl Parser {
                 accept,
                 reject,
             } => {
-                let (id, _) = self.parse_expression(
+                let (condition_id, _) = self.parse_expression(
                     ir_module,
                     function,
                     &function.expressions[*condition],
                     output,
                 );
 
-                let mut conditional_instruction = Instruction::new(Op::BranchConditional);
-                conditional_instruction.add_operand(id);
+                let (merge_label, merge_label_instruction) = self.instruction_label();
+                let mut selection_merge = Instruction::new(Op::SelectionMerge);
+                selection_merge.add_operand(merge_label);
+                selection_merge.add_operand(spirv::SelectionControl::NONE.bits());
 
-                let (accept_label, instruction) = self.instruction_label();
-                output.push(instruction);
-
-                let reject_label;
-                if reject.is_empty() {
-                    reject_label = current_block;
+                let (accept_label, accept_label_instruction) = self.instruction_label();
+                let (reject_label, reject_instruction) = if reject.is_empty() {
+                    (merge_label, merge_label_instruction)
                 } else {
-                    let (id, instruction) = self.instruction_label();
-                    output.push(instruction);
-                    reject_label = id;
-                }
+                    self.instruction_label()
+                };
 
-                conditional_instruction.add_operand(accept_label);
-                conditional_instruction.add_operand(reject_label);
-                output.push(conditional_instruction);
+                let mut branch_conditional = Instruction::new(Op::BranchConditional);
+                branch_conditional.add_operand(condition_id);
+                branch_conditional.add_operand(accept_label);
+                branch_conditional.add_operand(reject_label);
+
+                output.push(selection_merge);
+                output.push(branch_conditional);
+                output.push(accept_label_instruction);
 
                 for statement in accept {
                     self.instruction_function_block(
@@ -1228,17 +1234,18 @@ impl Parser {
                         function,
                         statement,
                         output,
-                        accept_label,
-                    );
+                        accept_label);
                 }
+
+                output.push(reject_instruction);
+
                 for statement in reject {
                     self.instruction_function_block(
                         ir_module,
                         function,
                         statement,
                         output,
-                        reject_label,
-                    );
+                        reject_label);
                 }
             }
             crate::Statement::Loop { body, continuing } => {}
@@ -1279,7 +1286,6 @@ impl Parser {
             ));
 
             let (label_id, label_instruction) = self.instruction_label();
-
             function_instructions.push(label_instruction);
 
             for block in function.body.iter() {
