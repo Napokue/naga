@@ -1073,6 +1073,7 @@ impl Parser {
                 instruction.set_type(pointer_id);
                 instruction.set_result(id);
                 instruction.add_operand(StorageClass::Function as u32);
+                output.push(instruction);
                 (id, &ty.inner)
             }
             crate::Expression::AccessIndex { base, index: _ } => {
