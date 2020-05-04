@@ -1074,6 +1074,14 @@ impl Parser {
                 instruction.set_result(id);
                 instruction.add_operand(StorageClass::Function as u32);
                 output.push(instruction);
+
+                if self.parser_flags.contains(ParserFlags::DEBUG) {
+                    let mut debug_instruction = Instruction::new(Op::Name);
+                    debug_instruction.set_result(id);
+                    debug_instruction.add_operands(self.string_to_words(var.name.as_ref().unwrap().as_str()));
+                    self.debugs.push(debug_instruction);
+                }
+
                 (id, &ty.inner)
             }
             crate::Expression::AccessIndex { base, index: _ } => {
