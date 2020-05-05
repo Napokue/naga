@@ -1,7 +1,7 @@
 /*! Standard Portable Intermediate Representation (SPIR-V) backend !*/
 use crate::arena::Handle;
 use crate::back::spv::{Instruction, LogicalLayout, ParserFlags, PhysicalLayout};
-use crate::{FastHashMap, FastHashSet};
+use crate::{FastHashMap, FastHashSet, ScalarKind};
 use spirv::*;
 
 #[derive(Debug, PartialEq)]
@@ -195,7 +195,6 @@ impl Parser {
                 execution_mode_instruction.add_operand(execution_mode as u32);
                 execution_mode_instruction.to_words(&mut self.logical_layout.execution_modes);
             }
-
             _ => unimplemented!("{:?}", entry_point.exec_model),
         }
 
@@ -562,6 +561,33 @@ impl Parser {
         }
     }
 
+    fn create_pointer(
+        &mut self,
+        type_id: Word,
+        handle: crate::Handle<crate::Type>,
+        class: StorageClass,
+    ) -> Word {
+        let pointer_id = self.generate_id();
+        let mut instruction = Instruction::new(Op::TypePointer);
+        instruction.set_result(pointer_id);
+        instruction.add_operand((class) as u32);
+        instruction.add_operand(type_id);
+
+        self.lookup_type.insert(
+            pointer_id,
+            LookupType::Standalone(crate::Type {
+                name: None,
+                inner: crate::TypeInner::Pointer {
+                    base: handle,
+                    class,
+                },
+            }),
+        );
+
+        instruction.to_words(&mut self.logical_layout.type_declarations);
+        pointer_id
+    }
+
     fn get_pointer_id(
         &mut self,
         arena: &crate::Arena<crate::Type>,
@@ -573,25 +599,7 @@ impl Parser {
         match ty.inner {
             crate::TypeInner::Pointer { .. } => type_id,
             _ => {
-                let pointer_id = self.generate_id();
-                let mut instruction = Instruction::new(Op::TypePointer);
-                instruction.set_result(pointer_id);
-                instruction.add_operand((class) as u32);
-                instruction.add_operand(type_id);
-
-                self.lookup_type.insert(
-                    pointer_id,
-                    LookupType::Standalone(crate::Type {
-                        name: None,
-                        inner: crate::TypeInner::Pointer {
-                            base: handle,
-                            class,
-                        },
-                    }),
-                );
-
-                instruction.to_words(&mut self.logical_layout.type_declarations);
-                pointer_id
+                self.create_pointer(type_id, handle, class)
             }
         }
     }
@@ -1084,8 +1092,28 @@ impl Parser {
 
                 (id, &ty.inner)
             }
-            crate::Expression::AccessIndex { base, index: _ } => {
-                self.parse_expression(ir_module, function, &function.expressions[*base], output)
+            crate::Expression::AccessIndex { base, index } => {
+                let (base_id, base_inner) = self.parse_expression(ir_module, function, &function.expressions[*base], output);
+
+                let base_pointer = match base_inner {
+                    crate::TypeInner::Vector { kind, width, .. } => {
+                        let scalar_handle = self.find_scalar_handle(&ir_module.types, &kind, &width);
+                        let scalar_id = self.get_type_id(&ir_module.types, scalar_handle);
+                        self.create_pointer(scalar_id, scalar_handle, StorageClass::Function)
+                    }
+                    _ => unimplemented!("{:?}", base_inner)
+                };
+
+                let mut instruction = Instruction::new(Op::AccessChain);
+                let id = self.generate_id();
+                instruction.set_type(base_pointer);
+                instruction.set_result(id);
+
+                // TODO Indexes
+
+                output.push(instruction);
+
+                (id, base_inner)
             }
             crate::Expression::Access { base, index: _ } => {
                 self.parse_expression(ir_module, function, &function.expressions[*base], output)
