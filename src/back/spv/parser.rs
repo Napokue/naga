@@ -225,8 +225,10 @@ impl Parser {
         match self.get_id(&self.lookup_constant, LookupType::Handle(handle)) {
             Some(word) => word,
             None => {
-                let (instruction, id) = self.instruction_constant_type(handle, ir_module);
+                let (instruction, id) = self.instruction_constant_type(&LookupType::Handle(handle), ir_module);
                 instruction.to_words(&mut self.logical_layout.constants);
+                self.lookup_constant.insert(id, LookupType::Handle(handle));
+
                 id
             }
         }
@@ -446,12 +448,16 @@ impl Parser {
 
     fn instruction_constant_type(
         &mut self,
-        handle: crate::Handle<crate::Constant>,
+        lookup_type: &LookupType<crate::Constant>,
         ir_module: &crate::Module,
     ) -> (Instruction, Word) {
         let id = self.generate_id();
-        self.lookup_constant.insert(id, LookupType::Handle(handle));
-        let constant = &ir_module.constants[handle];
+
+        let constant = match lookup_type {
+            LookupType::Handle(handle) => &ir_module.constants[*handle],
+            LookupType::Standalone(constant) => constant,
+        };
+
         let arena = &ir_module.types;
 
         match constant.inner {
@@ -1110,8 +1116,42 @@ impl Parser {
                 instruction.set_result(id);
 
                 // TODO Indexes
+                match base_inner {
+                    crate::TypeInner::Vector { kind, width, .. } => {
+                        let inner = match kind {
+                            crate::ScalarKind::Uint => crate::ConstantInner::Uint((*index) as u64),
+                            _ => unimplemented!("{:?}", kind)
+                        };
+
+                        let constant = crate::Constant {
+                          name: None,
+                            specialization: None,
+                            ty: self.find_scalar_handle(&ir_module.types, &kind, &width),
+                            inner
+                        };
+
+                        let (const_instruction, id) = self.instruction_constant_type(&LookupType::Standalone(constant), ir_module);
+
+                        // TODO
+                        self.lookup_constant.insert(id, LookupType::Standalone(crate::Constant {
+                            name: None,
+                            specialization: None,
+                            ty: self.find_scalar_handle(&ir_module.types, &kind, &width),
+                            inner: match kind {
+                                crate::ScalarKind::Uint => crate::ConstantInner::Uint((*index) as u64),
+                                _ => unimplemented!("{:?}", kind)
+                            }
+                        }));
+
+                        const_instruction.to_words(&mut self.logical_layout.constants);
+                        instruction.add_operand(id);
+                    }
+                    _ => unimplemented!("{:?}", base_inner)
+                }
 
                 output.push(instruction);
+
+                // TODO Load instruction
 
                 (id, base_inner)
             }
