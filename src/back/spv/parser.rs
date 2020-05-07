@@ -1067,9 +1067,27 @@ impl Parser {
                     self.bool_type = Some(bool_id);
                 }
 
+                // TODO Check how to do this properly,
+                //  without having to manually create a Load instruction here
+                let (kind, width) = match left_inner {
+                    crate::TypeInner::Scalar {
+                        kind, width
+                    } => (kind, width),
+                    _ => unimplemented!("{:?}", left_inner)
+                };
+
+                let scalar_handle = self.find_scalar_handle(&ir_module.types, kind, width);
+
+                let mut load = Instruction::new(Op::Load);
+                let load_id = self.generate_id();
+                load.set_type(self.get_type_id(&ir_module.types, scalar_handle));
+                load.set_result(load_id);
+                load.add_operand(left_id);
+                output.push(load);
+
                 instruction.set_type(self.bool_type.unwrap());
                 instruction.set_result(id);
-                instruction.add_operand(left_id);
+                instruction.add_operand(load_id);
                 instruction.add_operand(right_id);
                 output.push(instruction);
                 (id, left_inner)
