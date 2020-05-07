@@ -28,6 +28,7 @@ pub struct Parser {
     bool_type: Option<Word>,
     lookup_type: FastHashMap<Word, LookupType<crate::Type>>,
     lookup_function: FastHashMap<Word, LookupType<crate::Function>>,
+    lookup_local_variable: FastHashMap<String, Word>,
     lookup_function_type: FastHashMap<Word, LookupFunctionType>,
     lookup_constant: FastHashMap<Word, LookupType<crate::Constant>>,
     lookup_global_variable: FastHashMap<Word, LookupType<crate::GlobalVariable>>,
@@ -49,6 +50,7 @@ impl Parser {
             bool_type: None,
             lookup_type: FastHashMap::default(),
             lookup_function: FastHashMap::default(),
+            lookup_local_variable: FastHashMap::default(),
             lookup_function_type: FastHashMap::default(),
             lookup_constant: FastHashMap::default(),
             lookup_global_variable: FastHashMap::default(),
@@ -1093,28 +1095,35 @@ impl Parser {
                 (id, left_inner)
             }
             crate::Expression::LocalVariable(variable) => {
-                let id = self.generate_id();
-                let var = &function.local_variables[*variable];
 
+                let var = &function.local_variables[*variable];
                 let ty = &ir_module.types[var.ty];
 
-                let pointer_id =
-                    self.get_pointer_id(&ir_module.types, var.ty, StorageClass::Function);
+                if self.lookup_local_variable.contains_key(var.name.as_ref().unwrap().as_str()) {
+                    (*self.lookup_local_variable.get(var.name.as_ref().unwrap().as_str()).unwrap(), &ty.inner)
+                } else {
+                    let id = self.generate_id();
 
-                let mut instruction = Instruction::new(Op::Variable);
-                instruction.set_type(pointer_id);
-                instruction.set_result(id);
-                instruction.add_operand(StorageClass::Function as u32);
-                output.push(instruction);
 
-                if self.parser_flags.contains(ParserFlags::DEBUG) {
-                    let mut debug_instruction = Instruction::new(Op::Name);
-                    debug_instruction.set_result(id);
-                    debug_instruction.add_operands(self.string_to_words(var.name.as_ref().unwrap().as_str()));
-                    self.debugs.push(debug_instruction);
+                    let pointer_id =
+                        self.get_pointer_id(&ir_module.types, var.ty, StorageClass::Function);
+
+                    let mut instruction = Instruction::new(Op::Variable);
+                    instruction.set_type(pointer_id);
+                    instruction.set_result(id);
+                    instruction.add_operand(StorageClass::Function as u32);
+                    output.push(instruction);
+
+                    if self.parser_flags.contains(ParserFlags::DEBUG) {
+                        let mut debug_instruction = Instruction::new(Op::Name);
+                        debug_instruction.set_result(id);
+                        debug_instruction.add_operands(self.string_to_words(var.name.as_ref().unwrap().as_str()));
+                        self.debugs.push(debug_instruction);
+                    }
+
+                    self.lookup_local_variable.insert(var.name.as_ref().unwrap().parse().unwrap(), id);
+                    (id, &ty.inner)
                 }
-
-                (id, &ty.inner)
             }
             crate::Expression::AccessIndex { base, index } => {
                 let (base_id, base_inner) = self.parse_expression(ir_module, function, &function.expressions[*base], output);
@@ -1382,6 +1391,8 @@ impl Parser {
         }
 
         for (handle, function) in ir_module.functions.iter() {
+            self.lookup_local_variable = FastHashMap::default();
+
             let mut function_instructions: Vec<Instruction> = vec![];
             function_instructions.push(self.instruction_function(
                 handle,
