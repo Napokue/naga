@@ -1101,11 +1101,14 @@ impl Parser {
             crate::Expression::AccessIndex { base, index } => {
                 let (base_id, base_inner) = self.parse_expression(ir_module, function, &function.expressions[*base], output);
 
+                let mut scalar_id;
                 let base_pointer = match base_inner {
                     crate::TypeInner::Vector { kind, width, .. } => {
                         let scalar_handle = self.find_scalar_handle(&ir_module.types, &kind, &width);
-                        let scalar_id = self.get_type_id(&ir_module.types, scalar_handle);
-                        self.create_pointer(scalar_id, scalar_handle, StorageClass::Function)
+                        scalar_id = self.get_type_id(&ir_module.types, scalar_handle);
+                        // TODO Always passing Input Storage class.
+                        //  Storage Class needs to be equal to the base pointer Storage Class.
+                        self.create_pointer(scalar_id, scalar_handle, StorageClass::Input)
                     }
                     _ => unimplemented!("{:?}", base_inner)
                 };
@@ -1114,8 +1117,9 @@ impl Parser {
                 let id = self.generate_id();
                 instruction.set_type(base_pointer);
                 instruction.set_result(id);
+                instruction.add_operand(base_id);
 
-                // TODO Indexes
+                // TODO Find a cleaner way to do this.
                 match base_inner {
                     crate::TypeInner::Vector { kind, width, .. } => {
                         let inner = match kind {
@@ -1132,7 +1136,7 @@ impl Parser {
 
                         let (const_instruction, id) = self.instruction_constant_type(&LookupType::Standalone(constant), ir_module);
 
-                        // TODO
+                        // TODO Duplicate couple to by pass moved value
                         self.lookup_constant.insert(id, LookupType::Standalone(crate::Constant {
                             name: None,
                             specialization: None,
@@ -1151,9 +1155,14 @@ impl Parser {
 
                 output.push(instruction);
 
-                // TODO Load instruction
+                let mut load = Instruction::new(Op::Load);
+                let load_id = self.generate_id();
+                load.set_type(scalar_id);
+                load.set_result(load_id);
+                load.add_operand(id);
+                output.push(load);
 
-                (id, base_inner)
+                (load_id, base_inner)
             }
             crate::Expression::Access { base, index: _ } => {
                 self.parse_expression(ir_module, function, &function.expressions[*base], output)
