@@ -842,7 +842,7 @@ impl Parser {
                         // TODO Always assuming now that left and right are the same type
                         match left_inner {
                             crate::TypeInner::Scalar { kind, .. } => match kind {
-                                crate::ScalarKind::Sint => {
+                                crate::ScalarKind::Sint | crate::ScalarKind::Uint => {
                                     instruction = Instruction::new(Op::IAdd);
                                 }
                                 crate::ScalarKind::Float => {
@@ -1323,7 +1323,7 @@ impl Parser {
                 let (merge_label, merge_label_instruction) = self.instruction_label();
                 let mut selection_merge = Instruction::new(Op::SelectionMerge);
                 selection_merge.add_operand(merge_label);
-                selection_merge.add_operand(spirv::SelectionControl::NONE.bits());
+                selection_merge.add_operand(SelectionControl::NONE.bits());
 
                 let (accept_label, accept_label_instruction) = self.instruction_label();
                 let (reject_label, reject_instruction) = if reject.is_empty() {
@@ -1361,7 +1361,45 @@ impl Parser {
                         reject_label);
                 }
             }
-            crate::Statement::Loop { body, continuing } => {}
+            crate::Statement::Loop { body, continuing } => {
+
+                let mut body_output = vec![];
+                let (begin_body_label_id, begin_body_label_instruction) = self.instruction_label();
+                for statement in body.iter() {
+                    self.instruction_function_block(
+                        ir_module,
+                        function,
+                        statement,
+                        &mut body_output,
+                        begin_body_label_id);
+                }
+
+                let (end_body_label_id, end_body_label_instruction) = self.instruction_label();
+
+                let (continue_label_id, continue_label_instruction) = self.instruction_label();
+                let mut continuing_output = vec![];
+                for statement in continuing.iter() {
+                    self.instruction_function_block(
+                        ir_module,
+                        function,
+                        statement,
+                        &mut continuing_output,
+                        continue_label_id);
+                }
+                let mut branch = Instruction::new(Op::Branch);
+                branch.add_operand(label);
+
+                let mut loop_merge = Instruction::new(Op::LoopMerge);
+                loop_merge.add_operand(end_body_label_id);
+                loop_merge.add_operand(continue_label_id);
+                loop_merge.add_operand(LoopControl::NONE.bits());
+
+                output.push(loop_merge);
+                output.push(begin_body_label_instruction);
+                output.push(end_body_label_instruction);
+                output.append(&mut body_output);
+                output.append(&mut continuing_output);
+            }
             crate::Statement::Continue => {}
             crate::Statement::Break => {
                 output.push(Instruction::new(Op::Return));
