@@ -33,7 +33,7 @@ pub struct Parser {
     lookup_constant: FastHashMap<Word, LookupType<crate::Constant>>,
     lookup_global_variable: FastHashMap<Word, LookupType<crate::GlobalVariable>>,
     lookup_import: FastHashMap<Word, String>,
-    labels: Vec<Word>
+    function_variable_instructions: Vec<Instruction>
 }
 
 impl Parser {
@@ -55,7 +55,7 @@ impl Parser {
             lookup_constant: FastHashMap::default(),
             lookup_global_variable: FastHashMap::default(),
             lookup_import: FastHashMap::default(),
-            labels: vec![]
+            function_variable_instructions: vec![],
         }
     }
 
@@ -1075,6 +1075,7 @@ impl Parser {
                     crate::TypeInner::Scalar {
                         kind, width
                     } => (kind, width),
+                    crate::TypeInner::Vector {kind, width, ..} => (kind, width),
                     _ => unimplemented!("{:?}", left_inner)
                 };
 
@@ -1087,7 +1088,19 @@ impl Parser {
                 load.add_operand(left_id);
                 output.push(load);
 
-                instruction.set_type(self.bool_type.unwrap());
+                let type_id = match op {
+                    crate::BinaryOperator::Add |
+                    crate::BinaryOperator::Subtract |
+                    crate::BinaryOperator::Multiply |
+                    crate::BinaryOperator::Divide => self.get_type_id(&ir_module.types, scalar_handle),
+                    crate::BinaryOperator::Equal |
+                    crate::BinaryOperator::Less |
+                    crate::BinaryOperator::Greater |
+                    crate::BinaryOperator::GreaterEqual => self.bool_type.unwrap(),
+                    _ => unimplemented!(),
+                };
+
+                instruction.set_type(type_id);
                 instruction.set_result(id);
                 instruction.add_operand(load_id);
                 instruction.add_operand(right_id);
@@ -1095,7 +1108,6 @@ impl Parser {
                 (id, left_inner)
             }
             crate::Expression::LocalVariable(variable) => {
-
                 let var = &function.local_variables[*variable];
                 let ty = &ir_module.types[var.ty];
 
@@ -1112,7 +1124,7 @@ impl Parser {
                     instruction.set_type(pointer_id);
                     instruction.set_result(id);
                     instruction.add_operand(StorageClass::Function as u32);
-                    output.push(instruction);
+                    self.function_variable_instructions.push(instruction);
 
                     if self.parser_flags.contains(ParserFlags::DEBUG) {
                         let mut debug_instruction = Instruction::new(Op::Name);
@@ -1151,6 +1163,7 @@ impl Parser {
                     crate::TypeInner::Vector { kind, width, .. } => {
                         let inner = match kind {
                             crate::ScalarKind::Uint => crate::ConstantInner::Uint((*index) as u64),
+                            crate::ScalarKind::Float => crate::ConstantInner::Float((*index) as f64),
                             _ => unimplemented!("{:?}", kind)
                         };
 
@@ -1170,6 +1183,7 @@ impl Parser {
                             ty: self.find_scalar_handle(&ir_module.types, &kind, &width),
                             inner: match kind {
                                 crate::ScalarKind::Uint => crate::ConstantInner::Uint((*index) as u64),
+                                crate::ScalarKind::Float => crate::ConstantInner::Float((*index) as f64),
                                 _ => unimplemented!("{:?}", kind)
                             }
                         }));
@@ -1308,6 +1322,114 @@ impl Parser {
 
                 output.push(instruction)
             }
+            crate::Statement::Loop { body, continuing } => {
+
+
+                let mut loop_init_block_output = vec![];
+                let mut true_block_output = vec![];
+                let mut false_block_output = vec![];
+                let mut update_block_output = vec![];
+                let mut condition_block_output = vec![];
+
+                let (loop_init_label, loop_init_label_instruction) = self.instruction_label();
+                let (true_label, true_label_instruction) = self.instruction_label();
+                let (false_label, false_label_instruction) = self.instruction_label();
+                let (update_label, update_label_instruction) = self.instruction_label();
+                let (condition_label, condition_label_instruction) = self.instruction_label();
+
+                {
+                    let mut branch = Instruction::new(Op::Branch);
+                    branch.add_operand(loop_init_label);
+                    output.push(branch);
+                }
+
+                // Loop Init block
+                {
+                    let mut merge = Instruction::new(Op::LoopMerge);
+                    merge.add_operand(false_label);
+                    merge.add_operand(update_label);
+                    merge.add_operand(LoopControl::NONE.bits());
+
+                    let mut branch = Instruction::new(Op::Branch);
+                    branch.add_operand(condition_label);
+
+                    loop_init_block_output.push(loop_init_label_instruction);
+                    loop_init_block_output.push(merge);
+                    loop_init_block_output.push(branch);
+                }
+
+                // True Block
+                {
+                    true_block_output.push(true_label_instruction);
+
+                    for statement in body.iter() {
+                        self.instruction_function_block(
+                            ir_module,
+                            function,
+                            statement,
+                            &mut true_block_output,
+                            true_label);
+                    }
+
+                    let mut branch = Instruction::new(Op::Branch);
+                    branch.add_operand(update_label);
+                    true_block_output.push(branch);
+                }
+
+                // False Block
+                {
+                    false_block_output.push(false_label_instruction);
+                }
+
+                // Update Block
+                {
+                    update_block_output.push(update_label_instruction);
+
+                    for statement in continuing.iter() {
+                        self.instruction_function_block(
+                            ir_module,
+                            function,
+                            statement,
+                            &mut update_block_output,
+                            update_label);
+                    }
+
+                    let mut branch = Instruction::new(Op::Branch);
+                    branch.add_operand(loop_init_label);
+                    update_block_output.push(branch);
+                }
+
+                // Condition Block
+                {
+                    condition_block_output.push(condition_label_instruction);
+                    let mut conditional = Instruction::new(Op::BranchConditional);
+
+                    if self.bool_type.is_none() {
+                        let mut bool_instruction = Instruction::new(Op::TypeBool);
+                        let bool_id = self.generate_id();
+                        bool_instruction.set_result(bool_id);
+                        bool_instruction.to_words(&mut self.logical_layout.type_declarations);
+                        self.bool_type = Some(bool_id);
+                    }
+
+                    let bool_id = self.generate_id();
+                    let mut bool_instruction = Instruction::new(Op::ConstantTrue);
+                    bool_instruction.set_type(self.bool_type.unwrap());
+                    bool_instruction.set_result(bool_id);
+                    bool_instruction.to_words(&mut self.logical_layout.constants);
+
+                    conditional.add_operand(bool_id);
+                    conditional.add_operand(true_label);
+                    conditional.add_operand(false_label);
+                    condition_block_output.push(conditional);
+                }
+
+                output.append(&mut loop_init_block_output);
+                output.append(&mut condition_block_output);
+                output.append(&mut true_block_output);
+                output.append(&mut update_block_output);
+                output.append(&mut false_block_output);
+            }
             crate::Statement::If {
                 condition,
                 accept,
@@ -1361,45 +1483,6 @@ impl Parser {
                         reject_label);
                 }
             }
-            crate::Statement::Loop { body, continuing } => {
-
-                let mut body_output = vec![];
-                let (begin_body_label_id, begin_body_label_instruction) = self.instruction_label();
-                for statement in body.iter() {
-                    self.instruction_function_block(
-                        ir_module,
-                        function,
-                        statement,
-                        &mut body_output,
-                        begin_body_label_id);
-                }
-
-                let (end_body_label_id, end_body_label_instruction) = self.instruction_label();
-
-                let (continue_label_id, continue_label_instruction) = self.instruction_label();
-                let mut continuing_output = vec![];
-                for statement in continuing.iter() {
-                    self.instruction_function_block(
-                        ir_module,
-                        function,
-                        statement,
-                        &mut continuing_output,
-                        continue_label_id);
-                }
-                let mut branch = Instruction::new(Op::Branch);
-                branch.add_operand(label);
-
-                let mut loop_merge = Instruction::new(Op::LoopMerge);
-                loop_merge.add_operand(end_body_label_id);
-                loop_merge.add_operand(continue_label_id);
-                loop_merge.add_operand(LoopControl::NONE.bits());
-
-                output.push(loop_merge);
-                output.push(begin_body_label_instruction);
-                output.push(end_body_label_instruction);
-                output.append(&mut body_output);
-                output.append(&mut continuing_output);
-            }
             crate::Statement::Continue => {}
             crate::Statement::Break => {
                 output.push(Instruction::new(Op::Return));
@@ -1430,16 +1513,17 @@ impl Parser {
 
         for (handle, function) in ir_module.functions.iter() {
             self.lookup_local_variable = FastHashMap::default();
+            self.function_variable_instructions = vec![];
 
             let mut function_instructions: Vec<Instruction> = vec![];
-            function_instructions.push(self.instruction_function(
+            self.instruction_function(
                 handle,
                 function,
                 &ir_module.types,
-            ));
+            ).to_words(&mut self.logical_layout.function_definitions);
 
             let (label_id, label_instruction) = self.instruction_label();
-            function_instructions.push(label_instruction);
+            label_instruction.to_words(&mut self.logical_layout.function_definitions);
 
             for block in function.body.iter() {
                 let mut output: Vec<Instruction> = vec![];
@@ -1448,6 +1532,11 @@ impl Parser {
             }
 
             function_instructions.push(self.instruction_function_end());
+
+            for instruction in self.function_variable_instructions.iter() {
+                instruction.to_words(&mut self.logical_layout.function_definitions);
+            }
+
             for instruction in function_instructions.iter() {
                 instruction.to_words(&mut self.logical_layout.function_definitions);
             }
