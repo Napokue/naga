@@ -1300,7 +1300,12 @@ impl Parser {
         function: &crate::Function,
         statement: &crate::Statement,
         output: &mut Vec<Instruction>,
-        label: Word,
+        // TODO Hack to check if the instruction is in a loop,
+        //  Used for OpBranch back to the merge label if there is a break in the loop
+        merge_label: Option<Word>,
+        // TODO Hack to check if the instruction is in a loop,
+        //  Used for OpBranch back to the continue label if there is a continue in the loop
+        continue_label: Option<Word>
     ) {
         match statement {
             crate::Statement::Return { value: _ } => match function.return_type {
@@ -1323,19 +1328,15 @@ impl Parser {
                 output.push(instruction)
             }
             crate::Statement::Loop { body, continuing } => {
-
-
                 let mut loop_init_block_output = vec![];
-                let mut true_block_output = vec![];
-                let mut false_block_output = vec![];
-                let mut update_block_output = vec![];
-                let mut condition_block_output = vec![];
+                let mut loop_body_block_output = vec![];
+                let mut merge_block_output = vec![];
+                let mut continue_block_output = vec![];
 
                 let (loop_init_label, loop_init_label_instruction) = self.instruction_label();
-                let (true_label, true_label_instruction) = self.instruction_label();
-                let (false_label, false_label_instruction) = self.instruction_label();
-                let (update_label, update_label_instruction) = self.instruction_label();
-                let (condition_label, condition_label_instruction) = self.instruction_label();
+                let (loop_body_label, loop_body_label_instruction) = self.instruction_label();
+                let (merge_label, merge_label_instruction) = self.instruction_label();
+                let (continue_label, continue_label_instruction) = self.instruction_label();
 
                 {
                     let mut branch = Instruction::new(Op::Branch);
@@ -1346,89 +1347,67 @@ impl Parser {
                 // Loop Init block
                 {
                     let mut merge = Instruction::new(Op::LoopMerge);
-                    merge.add_operand(false_label);
-                    merge.add_operand(update_label);
+                    merge.add_operand(merge_label);
+                    merge.add_operand(continue_label);
                     merge.add_operand(LoopControl::NONE.bits());
 
                     let mut branch = Instruction::new(Op::Branch);
-                    branch.add_operand(condition_label);
+                    branch.add_operand(loop_body_label);
 
                     loop_init_block_output.push(loop_init_label_instruction);
                     loop_init_block_output.push(merge);
                     loop_init_block_output.push(branch);
                 }
 
-                // True Block
+                // Loop Body Block
                 {
-                    true_block_output.push(true_label_instruction);
+                    loop_body_block_output.push(loop_body_label_instruction);
 
                     for statement in body.iter() {
                         self.instruction_function_block(
                             ir_module,
                             function,
                             statement,
-                            &mut true_block_output,
-                            true_label);
+                            &mut loop_body_block_output,
+                            Some(merge_label),
+                            Some(continue_label),
+                        );
                     }
 
                     let mut branch = Instruction::new(Op::Branch);
-                    branch.add_operand(update_label);
-                    true_block_output.push(branch);
+                    branch.add_operand(continue_label);
+                    loop_body_block_output.push(branch);
                 }
 
-                // False Block
+                // Merge block
                 {
-                    false_block_output.push(false_label_instruction);
+                    merge_block_output.push(merge_label_instruction);
                 }
 
                 // Update Block
                 {
-                    update_block_output.push(update_label_instruction);
+                    continue_block_output.push(continue_label_instruction);
 
                     for statement in continuing.iter() {
                         self.instruction_function_block(
                             ir_module,
                             function,
                             statement,
-                            &mut update_block_output,
-                            update_label);
+                            &mut continue_block_output,
+                            None,
+                            None,
+                        );
                     }
 
                     let mut branch = Instruction::new(Op::Branch);
                     branch.add_operand(loop_init_label);
-                    update_block_output.push(branch);
-                }
-
-                // Condition Block
-                {
-                    condition_block_output.push(condition_label_instruction);
-                    let mut conditional = Instruction::new(Op::BranchConditional);
-
-                    if self.bool_type.is_none() {
-                        let mut bool_instruction = Instruction::new(Op::TypeBool);
-                        let bool_id = self.generate_id();
-                        bool_instruction.set_result(bool_id);
-                        bool_instruction.to_words(&mut self.logical_layout.type_declarations);
-                        self.bool_type = Some(bool_id);
-                    }
-
-                    let bool_id = self.generate_id();
-                    let mut bool_instruction = Instruction::new(Op::ConstantTrue);
-                    bool_instruction.set_type(self.bool_type.unwrap());
-                    bool_instruction.set_result(bool_id);
-                    bool_instruction.to_words(&mut self.logical_layout.constants);
-
-                    conditional.add_operand(bool_id);
-                    conditional.add_operand(true_label);
-                    conditional.add_operand(false_label);
-                    condition_block_output.push(conditional);
+                    continue_block_output.push(branch);
                 }
 
                 output.append(&mut loop_init_block_output);
-                output.append(&mut condition_block_output);
-                output.append(&mut true_block_output);
-                output.append(&mut update_block_output);
-                output.append(&mut false_block_output);
+                output.append(&mut loop_body_block_output);
+                output.append(&mut continue_block_output);
+                output.append(&mut merge_block_output);
             }
             crate::Statement::If {
                 condition,
@@ -1442,14 +1421,14 @@ impl Parser {
                     output,
                 );
 
-                let (merge_label, merge_label_instruction) = self.instruction_label();
+                let (selection_merge_label, selection_merge_label_instruction) = self.instruction_label();
                 let mut selection_merge = Instruction::new(Op::SelectionMerge);
-                selection_merge.add_operand(merge_label);
+                selection_merge.add_operand(selection_merge_label);
                 selection_merge.add_operand(SelectionControl::NONE.bits());
 
                 let (accept_label, accept_label_instruction) = self.instruction_label();
                 let (reject_label, reject_instruction) = if reject.is_empty() {
-                    (merge_label, merge_label_instruction)
+                    (selection_merge_label, selection_merge_label_instruction)
                 } else {
                     self.instruction_label()
                 };
@@ -1469,7 +1448,8 @@ impl Parser {
                         function,
                         statement,
                         output,
-                        accept_label);
+                        merge_label,
+                        continue_label);
                 }
 
                 output.push(reject_instruction);
@@ -1480,12 +1460,23 @@ impl Parser {
                         function,
                         statement,
                         output,
-                        reject_label);
+                        merge_label,
+                        continue_label);
                 }
             }
-            crate::Statement::Continue => {}
+            crate::Statement::Continue => {
+                let mut branch = Instruction::new(Op::Branch);
+                branch.add_operand(continue_label.unwrap());
+                output.push(branch);
+            }
             crate::Statement::Break => {
-                output.push(Instruction::new(Op::Return));
+                output.push(if merge_label.is_none() {
+                    Instruction::new(Op::Return)
+                } else {
+                    let mut branch = Instruction::new(Op::Branch);
+                    branch.add_operand(merge_label.unwrap());
+                    branch
+                });
             }
             crate::Statement::Empty => {}
             _ => unimplemented!("{:?}", statement),
@@ -1527,7 +1518,13 @@ impl Parser {
 
             for block in function.body.iter() {
                 let mut output: Vec<Instruction> = vec![];
-                self.instruction_function_block(ir_module, function, &block, &mut output, label_id);
+                self.instruction_function_block(
+                    ir_module,
+                    function,
+                    &block,
+                    &mut output,
+                    None,
+                    None);
                 function_instructions.append(&mut output);
             }
 
