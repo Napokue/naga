@@ -783,6 +783,19 @@ impl Parser {
             .unwrap()
     }
 
+    fn instruction_load(
+        &mut self,
+        type_id: Word,
+        pointer_id: Word,
+    ) -> (Word, Instruction) {
+        let id = self.generate_id();
+        let mut instr = Instruction::new(Op::Load);
+        instr.set_type(type_id);
+        instr.set_result(id);
+        instr.add_operand(pointer_id);
+        (id, instr)
+    }
+
     fn parse_expression<'a>(
         &mut self,
         ir_module: &'a crate::Module,
@@ -835,7 +848,7 @@ impl Parser {
                 let right_expression = &function.expressions[*right];
                 let (left_id, left_inner) =
                     self.parse_expression(ir_module, function, left_expression, output);
-                let (right_id, _) =
+                let (right_id, right_inner) =
                     self.parse_expression(ir_module, function, right_expression, output);
                 match op {
                     crate::BinaryOperator::Add => {
@@ -1057,53 +1070,91 @@ impl Parser {
                 }
 
                 let id = self.generate_id();
+                instruction.set_result(id);
 
-                // TODO TypeBool is always created, while only one is needed
-                //  Can't fix this right now, because lookup has handles
-                if self.bool_type.is_none() {
-                    let mut bool_instruction = Instruction::new(Op::TypeBool);
-                    let bool_id = self.generate_id();
-                    bool_instruction.set_result(bool_id);
-                    bool_instruction.to_words(&mut self.logical_layout.type_declarations);
+                // TODO Rework
+                {
+                    let (kind, width) = match left_inner {
+                        crate::TypeInner::Scalar {
+                            kind, width
+                        } => (kind, width),
+                        crate::TypeInner::Vector {kind, width, ..} => (kind, width),
+                        _ => unimplemented!("{:?}", left_inner)
+                    };
 
-                    self.bool_type = Some(bool_id);
+                    let scalar_handle = self.find_scalar_handle(&ir_module.types, kind, width);
+
+                    let type_id = match op {
+                        crate::BinaryOperator::Add |
+                        crate::BinaryOperator::Subtract |
+                        crate::BinaryOperator::Multiply |
+                        crate::BinaryOperator::Divide => self.get_type_id(&ir_module.types, scalar_handle),
+                        crate::BinaryOperator::Equal |
+                        crate::BinaryOperator::Less |
+                        crate::BinaryOperator::Greater |
+                        crate::BinaryOperator::GreaterEqual => {
+                            // TODO TypeBool is always created, while only one is needed
+                            //  Can't fix this right now, because lookup has handles
+                            if self.bool_type.is_none() {
+                                let mut bool_instruction = Instruction::new(Op::TypeBool);
+                                let bool_id = self.generate_id();
+                                bool_instruction.set_result(bool_id);
+                                bool_instruction.to_words(&mut self.logical_layout.type_declarations);
+
+                                self.bool_type = Some(bool_id);
+                                bool_id
+                            } else {
+                                self.bool_type.unwrap()
+                            }
+                        },
+                        _ => unimplemented!(),
+                    };
+
+                    instruction.set_type(type_id);
+
+                    let id = match left_expression {
+                        crate::Expression::GlobalVariable(..) |
+                        crate::Expression::LocalVariable(..) => {
+                            let type_id = self.get_type_id(&ir_module.types, scalar_handle);
+                            let (id, instr) = self.instruction_load(type_id, left_id);
+                            output.push(instr);
+                            id
+                        },
+                        crate::Expression::Constant(..) => {
+                            left_id
+                        }
+                        _ => panic!()
+                    };
+
+                    instruction.add_operand(id);
                 }
 
-                // TODO Check how to do this properly,
-                //  without having to manually create a Load instruction here
-                let (kind, width) = match left_inner {
-                    crate::TypeInner::Scalar {
-                        kind, width
-                    } => (kind, width),
-                    crate::TypeInner::Vector {kind, width, ..} => (kind, width),
-                    _ => unimplemented!("{:?}", left_inner)
-                };
+                {
+                    let (kind, width) = match right_inner {
+                        crate::TypeInner::Scalar {
+                            kind, width
+                        } => (kind, width),
+                        crate::TypeInner::Vector {kind, width, ..} => (kind, width),
+                        _ => unimplemented!("{:?}", right_inner)
+                    };
 
-                let scalar_handle = self.find_scalar_handle(&ir_module.types, kind, width);
+                    let id = match right_expression {
+                        crate::Expression::GlobalVariable(..) |
+                        crate::Expression::LocalVariable(..) => {
+                            let scalar_handle = self.find_scalar_handle(&ir_module.types, kind, width);
+                            let type_id = self.get_type_id(&ir_module.types, scalar_handle);
+                            let (id, instr) = self.instruction_load(type_id, right_id);
+                            output.push(instr);
+                            id
+                        },
+                        crate::Expression::Constant(..) => {
+                            right_id
+                        }
+                        _ => panic!()
+                    };
+                    instruction.add_operand(id);
+                }
 
-                let mut load = Instruction::new(Op::Load);
-                let load_id = self.generate_id();
-                load.set_type(self.get_type_id(&ir_module.types, scalar_handle));
-                load.set_result(load_id);
-                load.add_operand(left_id);
-                output.push(load);
-
-                let type_id = match op {
-                    crate::BinaryOperator::Add |
-                    crate::BinaryOperator::Subtract |
-                    crate::BinaryOperator::Multiply |
-                    crate::BinaryOperator::Divide => self.get_type_id(&ir_module.types, scalar_handle),
-                    crate::BinaryOperator::Equal |
-                    crate::BinaryOperator::Less |
-                    crate::BinaryOperator::Greater |
-                    crate::BinaryOperator::GreaterEqual => self.bool_type.unwrap(),
-                    _ => unimplemented!(),
-                };
-
-                instruction.set_type(type_id);
-                instruction.set_result(id);
-                instruction.add_operand(load_id);
-                instruction.add_operand(right_id);
                 output.push(instruction);
                 (id, left_inner)
             }
@@ -1195,13 +1246,8 @@ impl Parser {
                 }
 
                 output.push(instruction);
-
-                let mut load = Instruction::new(Op::Load);
-                let load_id = self.generate_id();
-                load.set_type(scalar_id);
-                load.set_result(load_id);
-                load.add_operand(id);
-                output.push(load);
+                let (load_id, load_instr) = self.instruction_load(scalar_id, id);
+                output.push(load_instr);
 
                 (load_id, base_inner)
             }
