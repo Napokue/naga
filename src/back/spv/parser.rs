@@ -132,6 +132,12 @@ impl Parser {
         instruction
     }
 
+    fn instruction_extension(&mut self, extension: &str) -> Instruction {
+        let mut instruction = Instruction::new(Op::Extension);
+        instruction.add_operands(self.string_to_words(extension));
+        instruction
+    }
+
     fn instruction_memory_model(&mut self) -> Instruction {
         let mut instruction = Instruction::new(Op::MemoryModel);
         let addressing_model = AddressingModel::Logical;
@@ -1575,6 +1581,12 @@ impl Parser {
     fn write_logical_layout(&mut self, ir_module: &crate::Module) {
         self.instruction_ext_inst_import()
             .to_words(&mut self.logical_layout.ext_inst_imports);
+
+        self.instruction_extension("SPV_KHR_storage_buffer_storage_class")
+            .to_words(&mut self.logical_layout.extensions);
+
+        self.instruction_extension("SPV_KHR_variable_pointers")
+            .to_words(&mut self.logical_layout.extensions);
 
         if self.parser_flags.contains(ParserFlags::DEBUG) {
             self.debugs.push(self.instruction_source());
