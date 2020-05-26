@@ -27,9 +27,7 @@ pub(crate) struct LogicalLayout {
     execution_modes: Vec<Word>,
     debugs: Vec<Word>,
     annotations: Vec<Word>,
-    type_declarations: Vec<Word>,
-    constants: Vec<Word>,
-    global_variables: Vec<Word>,
+    declarations: Vec<Word>,
     function_declarations: Vec<Word>,
     function_definitions: Vec<Word>,
 }

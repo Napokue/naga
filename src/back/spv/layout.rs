@@ -39,9 +39,7 @@ impl LogicalLayout {
             execution_modes: vec![],
             debugs: vec![],
             annotations: vec![],
-            type_declarations: vec![],
-            constants: vec![],
-            global_variables: vec![],
+            declarations: vec![],
             function_declarations: vec![],
             function_definitions: vec![],
         }
@@ -56,9 +54,7 @@ impl LogicalLayout {
         sink.extend(self.execution_modes.iter().cloned());
         sink.extend(self.debugs.iter().cloned());
         sink.extend(self.annotations.iter().cloned());
-        sink.extend(self.type_declarations.iter().cloned());
-        sink.extend(self.constants.iter().cloned());
-        sink.extend(self.global_variables.iter().cloned());
+        sink.extend(self.declarations.iter().cloned());
         sink.extend(self.function_declarations.iter().cloned());
         sink.extend(self.function_definitions.iter().cloned());
     }

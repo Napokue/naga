@@ -213,7 +213,7 @@ impl Parser {
             None => {
                 let (instruction, id) = self.instruction_type_declaration(arena, handle);
                 self.lookup_type.insert(id, LookupType::Handle(handle));
-                instruction.to_words(&mut self.logical_layout.type_declarations);
+                instruction.to_words(&mut self.logical_layout.declarations);
                 id
             }
         }
@@ -228,7 +228,7 @@ impl Parser {
             Some(word) => word,
             None => {
                 let (instruction, id) = self.instruction_constant_type(&LookupType::Handle(handle), ir_module);
-                instruction.to_words(&mut self.logical_layout.constants);
+                instruction.to_words(&mut self.logical_layout.declarations);
                 self.lookup_constant.insert(id, LookupType::Handle(handle));
 
                 id
@@ -248,7 +248,7 @@ impl Parser {
                 let global_variable = &global_arena[handle];
                 let (instruction, id) =
                     self.instruction_global_variable(arena, global_variable, handle);
-                instruction.to_words(&mut self.logical_layout.global_variables);
+                instruction.to_words(&mut self.logical_layout.declarations);
                 id
             }
         }
@@ -270,7 +270,7 @@ impl Parser {
                     instruction.set_result(id);
 
                     self.void_type = Some(id);
-                    instruction.to_words(&mut self.logical_layout.type_declarations);
+                    instruction.to_words(&mut self.logical_layout.declarations);
                     id
                 }
             },
@@ -624,7 +624,7 @@ impl Parser {
             }),
         );
 
-        instruction.to_words(&mut self.logical_layout.type_declarations);
+        instruction.to_words(&mut self.logical_layout.declarations);
         pointer_id
     }
 
@@ -745,7 +745,7 @@ impl Parser {
             }
 
             self.lookup_function_type.insert(_id, lookup_function_type);
-            instruction.to_words(&mut self.logical_layout.type_declarations);
+            instruction.to_words(&mut self.logical_layout.declarations);
         }
 
         id.unwrap()
@@ -1131,7 +1131,7 @@ impl Parser {
                                 let mut bool_instruction = Instruction::new(Op::TypeBool);
                                 let bool_id = self.generate_id();
                                 bool_instruction.set_result(bool_id);
-                                bool_instruction.to_words(&mut self.logical_layout.type_declarations);
+                                bool_instruction.to_words(&mut self.logical_layout.declarations);
 
                                 self.bool_type = Some(bool_id);
                                 bool_id
@@ -1271,7 +1271,7 @@ impl Parser {
                             }
                         }));
 
-                        const_instruction.to_words(&mut self.logical_layout.constants);
+                        const_instruction.to_words(&mut self.logical_layout.declarations);
                         instruction.add_operand(id);
                     }
                     _ => unimplemented!("{:?}", base_inner)
