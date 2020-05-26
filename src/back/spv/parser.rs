@@ -374,8 +374,40 @@ impl Parser {
                 instruction.add_operand(type_id);
 
                 match size {
-                    crate::ArraySize::Static(word) => {
-                        instruction.add_operand(word);
+                    crate::ArraySize::Static(size) => {
+
+                        // TODO Very nasty code to hack this together
+                        let inner = crate::ConstantInner::Uint((size) as u64);
+
+
+                        let constant = crate::Constant {
+                            name: None,
+                            specialization: None,
+                            ty: self.find_scalar_handle(arena, &crate::ScalarKind::Uint, &32),
+                            inner
+                        };
+
+                        let id = self.generate_id();
+                        let type_id = self.get_type_id(arena, constant.ty);
+
+                        let mut const_instruction = Instruction::new(Op::Constant);
+                        const_instruction.set_type(type_id);
+                        const_instruction.set_result(id);
+
+                        let ty = &arena[constant.ty];
+                        match ty.inner {
+                            crate::TypeInner::Scalar { kind: _, width } => match width {
+                                32 => {
+                                    const_instruction.add_operand(size);
+                                }
+                                _ => unreachable!(),
+                            },
+                            _ => unreachable!(),
+                        }
+
+                        const_instruction.to_words(&mut self.logical_layout.declarations);
+
+                        instruction.add_operand(id);
                     }
                     _ => panic!("Array size {:?} unsupported", size),
                 }
