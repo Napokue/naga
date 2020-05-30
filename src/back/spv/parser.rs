@@ -120,15 +120,13 @@ impl Parser {
         }
     }
 
-    fn instruction_ext_inst_import(&mut self) -> Instruction {
-        let mut instruction = Instruction::new(Op::ExtInstImport);
+    fn instruction_ext_inst_import(&mut self, name: &str) -> Instruction {
         let id = self.generate_id();
+        self.lookup_import.insert(id, String::from(name));
+
+        let mut instruction = Instruction::new(Op::ExtInstImport);
         instruction.set_result(id);
-
-        // TODO Support other imports
-        instruction.add_operands(self.string_to_words("GLSL.std.450"));
-        self.lookup_import.insert(id, String::from("GLSL.std.450"));
-
+        instruction.add_operands(self.string_to_words(name));
         instruction
     }
 
@@ -1579,7 +1577,7 @@ impl Parser {
     }
 
     fn write_logical_layout(&mut self, ir_module: &crate::Module) {
-        self.instruction_ext_inst_import()
+        self.instruction_ext_inst_import("GLSL.std.450")
             .to_words(&mut self.logical_layout.ext_inst_imports);
 
         self.instruction_extension("SPV_KHR_storage_buffer_storage_class")
