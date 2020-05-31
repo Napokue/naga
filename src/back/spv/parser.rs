@@ -434,7 +434,7 @@ impl Parser {
                 instruction.add_operand(type_id);
                 instruction.add_operand(dim as u32);
 
-                // TODO Add Depth, but how to determine? Not yet in the WGSL spec
+                // TODO Defaults to Depth Image, not yet in IR
                 instruction.add_operand(1);
 
                 instruction.add_operand(if flags.contains(crate::ImageFlags::ARRAYED) {
@@ -459,7 +459,7 @@ impl Parser {
                         0
                     });
 
-                    // TODO Add Image Format, but how to determine? Not yet in the WGSL spec
+                    // TODO Defaults to Unknown, not yet in IR
                     instruction.add_operand(ImageFormat::Unknown as u32);
                 };
 
@@ -706,7 +706,7 @@ impl Parser {
             }
         }
 
-        // TODO Initializer is optional and not (yet) included in the IR
+        // TODO Initializer is optional and not yet included in the IR
 
         self.lookup_global_variable
             .insert(id, LookupType::Handle(handle));
