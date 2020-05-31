@@ -832,6 +832,106 @@ impl Parser {
         (id, instr)
     }
 
+    fn parse_binary_instruction(
+        &self,
+        op: &crate::BinaryOperator,
+        ty_inner: &crate::TypeInner,
+    ) -> Instruction {
+        match op {
+            crate::BinaryOperator::Add => {
+                match ty_inner {
+                    crate::TypeInner::Scalar { kind, .. } => match kind {
+                        crate::ScalarKind::Sint |
+                        crate::ScalarKind::Uint => Instruction::new(Op::IAdd),
+                        crate::ScalarKind::Float => Instruction::new(Op::FAdd),
+                        _ => unimplemented!("{:?}", kind),
+                    },
+                    crate::TypeInner::Vector { kind, .. } => match kind {
+                        crate::ScalarKind::Sint => Instruction::new(Op::IAdd),
+                        crate::ScalarKind::Float => Instruction::new(Op::FAdd),
+                        _ => unimplemented!("{:?}", kind),
+                    },
+                    _ => unimplemented!("{:?}", ty_inner),
+                }
+            }
+            crate::BinaryOperator::Subtract => {
+                match ty_inner {
+                    crate::TypeInner::Scalar { kind, .. } |
+                    crate::TypeInner::Vector { kind, .. } => match kind {
+                        crate::ScalarKind::Sint => Instruction::new(Op::SNegate),
+                        crate::ScalarKind::Float => Instruction::new(Op::FNegate),
+                        _ => unimplemented!("{:?}", kind),
+                    },
+                    _ => unimplemented!("{:?}", ty_inner),
+                }
+            }
+            crate::BinaryOperator::Multiply => Instruction::new(Op::VectorTimesScalar),
+            crate::BinaryOperator::Divide => {
+                match ty_inner {
+                    crate::TypeInner::Scalar { kind, .. } |
+                    crate::TypeInner::Vector { kind, .. } => match kind {
+                        crate::ScalarKind::Uint => Instruction::new(Op::UDiv),
+                        crate::ScalarKind::Sint => Instruction::new(Op::SDiv),
+                        crate::ScalarKind::Float => Instruction::new(Op::FDiv),
+                        _ => unimplemented!("{:?}", kind),
+                    },
+                    _ => unimplemented!("{:?}", ty_inner),
+                }
+            }
+            crate::BinaryOperator::Equal => {
+                match ty_inner {
+                    crate::TypeInner::Scalar { kind, .. } => match kind {
+                        crate::ScalarKind::Uint => Instruction::new(Op::IEqual),
+                        crate::ScalarKind::Sint => Instruction::new(Op::IEqual),
+                        _ => unimplemented!("{:?}", kind),
+                    },
+                    crate::TypeInner::Vector { kind, .. } => match kind {
+                        crate::ScalarKind::Uint |
+                        crate::ScalarKind::Sint => Instruction::new(Op::IEqual),
+                        _ => unimplemented!("{:?}", kind),
+                    },
+                    _ => unimplemented!("{:?}", ty_inner),
+                }
+            }
+            crate::BinaryOperator::Less => {
+                match ty_inner {
+                    crate::TypeInner::Scalar { kind, .. } |
+                    crate::TypeInner::Vector { kind, .. } => match kind {
+                        crate::ScalarKind::Uint => Instruction::new(Op::ULessThan),
+                        crate::ScalarKind::Sint => Instruction::new(Op::SLessThan),
+                        crate::ScalarKind::Float => Instruction::new(Op::FOrdLessThan),
+                        _ => unimplemented!("{:?}", kind),
+                    },
+                    _ => unimplemented!("{:?}", ty_inner),
+                }
+            }
+            crate::BinaryOperator::Greater => {
+                match ty_inner {
+                    crate::TypeInner::Scalar { kind, .. } |
+                    crate::TypeInner::Vector { kind, .. } => match kind {
+                        crate::ScalarKind::Uint => Instruction::new(Op::UGreaterThan),
+                        crate::ScalarKind::Sint => Instruction::new(Op::SGreaterThan),
+                        crate::ScalarKind::Float => Instruction::new(Op::FOrdGreaterThan),
+                        _ => unimplemented!("{:?}", kind),
+                    },
+                    _ => unimplemented!("{:?}", ty_inner),
+                }
+            }
+            crate::BinaryOperator::GreaterEqual => {
+                match ty_inner {
+                    crate::TypeInner::Scalar { kind, .. } |
+                    crate::TypeInner::Vector { kind, .. } => match kind {
+                        crate::ScalarKind::Uint => Instruction::new(Op::UGreaterThanEqual),
+                        crate::ScalarKind::Sint => Instruction::new(Op::SGreaterThanEqual),
+                        _ => unimplemented!("{:?}", kind),
+                    },
+                    _ => unimplemented!("{:?}", ty_inner),
+                }
+            }
+            _ => unimplemented!("{:?}", op),
+        }
+    }
+
     fn parse_expression<'a>(
         &mut self,
         ir_module: &'a crate::Module,
@@ -878,234 +978,20 @@ impl Parser {
                 (id, inner)
             }
             crate::Expression::Binary { op, left, right } => {
-                let mut instruction;
-
                 let left_expression = &function.expressions[*left];
                 let right_expression = &function.expressions[*right];
                 let (left_id, left_inner) =
                     self.parse_expression(ir_module, function, left_expression, output);
                 let (right_id, right_inner) =
                     self.parse_expression(ir_module, function, right_expression, output);
-                match op {
-                    crate::BinaryOperator::Add => {
-                        // TODO Always assuming now that left and right are the same type
-                        match left_inner {
-                            crate::TypeInner::Scalar { kind, .. } => match kind {
-                                crate::ScalarKind::Sint | crate::ScalarKind::Uint => {
-                                    instruction = Instruction::new(Op::IAdd);
-                                }
-                                crate::ScalarKind::Float => {
-                                    instruction = Instruction::new(Op::FAdd);
-                                }
-                                _ => unimplemented!("{:?}", kind),
-                            },
-                            crate::TypeInner::Vector {
-                                size: _,
-                                kind,
-                                width: _,
-                            } => match kind {
-                                crate::ScalarKind::Sint => {
-                                    instruction = Instruction::new(Op::IAdd);
-                                }
-                                crate::ScalarKind::Float => {
-                                    instruction = Instruction::new(Op::FAdd);
-                                }
-                                _ => unimplemented!("{:?}", kind),
-                            },
-                            _ => unimplemented!("{:?}", left_inner),
-                        }
-                    }
-                    crate::BinaryOperator::Subtract => {
-                        // TODO Always assuming now that left and right are the same type
-                        match left_inner {
-                            crate::TypeInner::Scalar { kind, .. } => match kind {
-                                crate::ScalarKind::Sint => {
-                                    instruction = Instruction::new(Op::SNegate);
-                                }
-                                crate::ScalarKind::Float => {
-                                    instruction = Instruction::new(Op::FNegate);
-                                }
-                                _ => unimplemented!("{:?}", kind),
-                            },
-                            crate::TypeInner::Vector {
-                                size: _,
-                                kind,
-                                width: _,
-                            } => match kind {
-                                crate::ScalarKind::Sint => {
-                                    instruction = Instruction::new(Op::SNegate);
-                                }
-                                crate::ScalarKind::Float => {
-                                    instruction = Instruction::new(Op::FNegate);
-                                }
-                                _ => unimplemented!("{:?}", kind),
-                            },
-                            _ => unimplemented!("{:?}", left_inner),
-                        }
-                    }
-                    crate::BinaryOperator::Multiply => {
-                        // TODO OpVectorTimesScalar is only supported
-                        instruction = Instruction::new(Op::VectorTimesScalar);
-                    }
-                    crate::BinaryOperator::Divide => {
-                        // TODO Always assuming now that left and right are the same type
-                        match left_inner {
-                            crate::TypeInner::Scalar { kind, .. } => match kind {
-                                crate::ScalarKind::Uint => {
-                                    instruction = Instruction::new(Op::UDiv);
-                                }
-                                crate::ScalarKind::Sint => {
-                                    instruction = Instruction::new(Op::SDiv);
-                                }
-                                crate::ScalarKind::Float => {
-                                    instruction = Instruction::new(Op::FDiv);
-                                }
-                                _ => unimplemented!("{:?}", kind),
-                            },
-                            crate::TypeInner::Vector {
-                                size: _,
-                                kind,
-                                width: _,
-                            } => match kind {
-                                crate::ScalarKind::Uint => {
-                                    instruction = Instruction::new(Op::UDiv);
-                                }
-                                crate::ScalarKind::Sint => {
-                                    instruction = Instruction::new(Op::SDiv);
-                                }
-                                crate::ScalarKind::Float => {
-                                    instruction = Instruction::new(Op::FDiv);
-                                }
-                                _ => unimplemented!("{:?}", kind),
-                            },
-                            _ => unimplemented!("{:?}", left_inner),
-                        }
-                    }
-                    crate::BinaryOperator::Equal => {
-                        // TODO Always assuming now that left and right are the same type
-                        match left_inner {
-                            crate::TypeInner::Scalar { kind, .. } => match kind {
-                                crate::ScalarKind::Uint => {
-                                    instruction = Instruction::new(Op::IEqual);
-                                }
-                                crate::ScalarKind::Sint => {
-                                    instruction = Instruction::new(Op::IEqual);
-                                }
-                                _ => unimplemented!("{:?}", kind),
-                            },
-                            crate::TypeInner::Vector {
-                                size: _,
-                                kind,
-                                width: _,
-                            } => match kind {
-                                crate::ScalarKind::Uint | crate::ScalarKind::Sint => {
-                                    instruction = Instruction::new(Op::IEqual);
-                                }
-                                _ => unimplemented!("{:?}", kind),
-                            },
-                            _ => unimplemented!("{:?}", left_inner),
-                        }
-                    }
-                    crate::BinaryOperator::Less => {
-                        // TODO Always assuming now that left and right are the same type
-                        match left_inner {
-                            crate::TypeInner::Scalar { kind, .. } => match kind {
-                                crate::ScalarKind::Uint => {
-                                    instruction = Instruction::new(Op::ULessThan);
-                                }
-                                crate::ScalarKind::Sint => {
-                                    instruction = Instruction::new(Op::SLessThan);
-                                }
-                                crate::ScalarKind::Float => {
-                                    instruction = Instruction::new(Op::FOrdLessThan);
-                                }
-                                _ => unimplemented!("{:?}", kind),
-                            },
-                            crate::TypeInner::Vector {
-                                size: _,
-                                kind,
-                                width: _,
-                            } => match kind {
-                                crate::ScalarKind::Uint => {
-                                    instruction = Instruction::new(Op::ULessThan);
-                                }
-                                crate::ScalarKind::Sint => {
-                                    instruction = Instruction::new(Op::SLessThan);
-                                }
-                                crate::ScalarKind::Float => {
-                                    instruction = Instruction::new(Op::FOrdLessThan);
-                                }
-                                _ => unimplemented!("{:?}", kind),
-                            },
-                            _ => unimplemented!("{:?}", left_inner),
-                        }
-                    }
-                    crate::BinaryOperator::Greater => {
-                        // TODO Always assuming now that left and right are the same type
-                        match left_inner {
-                            crate::TypeInner::Scalar { kind, .. } => match kind {
-                                crate::ScalarKind::Uint => {
-                                    instruction = Instruction::new(Op::UGreaterThan);
-                                }
-                                crate::ScalarKind::Sint => {
-                                    instruction = Instruction::new(Op::SGreaterThan);
-                                }
-                                crate::ScalarKind::Float => {
-                                    instruction = Instruction::new(Op::FOrdGreaterThan);
-                                }
-                                _ => unimplemented!("{:?}", kind),
-                            },
-                            crate::TypeInner::Vector {
-                                size: _,
-                                kind,
-                                width: _,
-                            } => match kind {
-                                crate::ScalarKind::Uint => {
-                                    instruction = Instruction::new(Op::UGreaterThan);
-                                }
-                                crate::ScalarKind::Sint => {
-                                    instruction = Instruction::new(Op::SGreaterThan);
-                                }
-                                crate::ScalarKind::Float => {
-                                    instruction = Instruction::new(Op::FOrdGreaterThan);
-                                }
-                                _ => unimplemented!("{:?}", kind),
-                            },
-                            _ => unimplemented!("{:?}", left_inner),
-                        }
-                    }
-                    crate::BinaryOperator::GreaterEqual => {
-                        // TODO Always assuming now that left and right are the same type
-                        match left_inner {
-                            crate::TypeInner::Scalar { kind, .. } => match kind {
-                                crate::ScalarKind::Uint => {
-                                    instruction = Instruction::new(Op::UGreaterThanEqual);
-                                }
-                                crate::ScalarKind::Sint => {
-                                    instruction = Instruction::new(Op::SGreaterThanEqual);
-                                }
-                                _ => unimplemented!("{:?}", kind),
-                            },
-                            crate::TypeInner::Vector {
-                                size: _,
-                                kind,
-                                width: _,
-                            } => match kind {
-                                crate::ScalarKind::Uint => {
-                                    instruction = Instruction::new(Op::UGreaterThanEqual);
-                                }
-                                crate::ScalarKind::Sint => {
-                                    instruction = Instruction::new(Op::SGreaterThanEqual);
-                                }
-                                _ => unimplemented!("{:?}", kind),
-                            },
-                            _ => unimplemented!("{:?}", left_inner),
-                        }
-                    }
-                    _ => unimplemented!("{:?}", op),
+
+                // For now enforce strict rules about using the same left and right types
+                if left_inner != right_inner {
+                    panic!("Left expression: {:?}, and right expression: {:?} are not of the same type.", left_inner, right_inner)
                 }
 
                 let id = self.generate_id();
+                let mut instruction = self.parse_binary_instruction(op, left_inner);
                 instruction.set_result(id);
 
                 // TODO Rework
