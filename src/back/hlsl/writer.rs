@@ -1,4 +1,4 @@
-use super::Error;
+use super::{Error, Options};
 use crate::back::hlsl::keywords::RESERVED;
 use crate::proc::{NameKey, Namer};
 use crate::{FastHashMap, ShaderStage};
@@ -6,26 +6,30 @@ use std::fmt::Write;
 
 const INDENT: &str = "    ";
 
-pub struct Writer<W> {
+pub struct Writer<'a, W> {
     out: W,
+    module: &'a crate::Module,
+    options: &'a Options,
     names: FastHashMap<NameKey, String>,
     namer: Namer,
 }
 
-impl<W: Write> Writer<W> {
-    pub fn new(out: W) -> Self {
+impl<'a, W: Write> Writer<'a, W> {
+    pub fn new(out: W, module: &'a crate::Module, options: &'a Options) -> Self {
         Writer {
             out,
+            module,
+            options,
             names: FastHashMap::default(),
             namer: Namer::default(),
         }
     }
 
-    pub fn write(&mut self, module: &crate::Module) -> Result<(), Error> {
+    pub fn write(&mut self) -> Result<(), Error> {
         self.names.clear();
-        self.namer.reset(module, RESERVED, &mut self.names);
+        self.namer.reset(self.module, RESERVED, &mut self.names);
 
-        for (ep_index, ep) in module.entry_points.iter().enumerate() {
+        for (ep_index, ep) in self.module.entry_points.iter().enumerate() {
             let fun = &ep.function;
             let fun_name = &self.names[&NameKey::EntryPoint(ep_index as _)];
             writeln!(self.out)?;

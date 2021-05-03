@@ -235,7 +235,12 @@ fn convert_wgsl() {
         ),
         (
             "quad",
-            Targets::SPIRV | Targets::METAL | Targets::GLSL | Targets::DOT | Targets::WGSL,
+            Targets::SPIRV
+                | Targets::METAL
+                | Targets::GLSL
+                | Targets::HLSL
+                | Targets::DOT
+                | Targets::WGSL,
         ),
         ("boids", Targets::SPIRV | Targets::METAL | Targets::GLSL),
         ("skybox", Targets::SPIRV | Targets::METAL | Targets::GLSL),

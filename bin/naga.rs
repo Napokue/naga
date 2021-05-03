@@ -15,6 +15,8 @@ struct Parameters {
     msl: naga::back::msl::Options,
     #[cfg(feature = "glsl-out")]
     glsl: naga::back::glsl::Options,
+    #[cfg(feature = "hlsl-out")]
+    hlsl: naga::back::hlsl::Options,
 }
 
 trait PrettyResult {
@@ -64,6 +66,8 @@ fn main() {
                 "flow-dir" => params.spv_flow_dump_prefix = args.next(),
                 #[cfg(feature = "glsl-out")]
                 "entry-point" => params.glsl.entry_point = args.next().unwrap(),
+                #[cfg(feature = "hlsl-out")]
+                "entry-points" => params.hlsl.entry_point = args.next().unwrap(),
                 #[cfg(feature = "glsl-out")]
                 "profile" => {
                     use naga::back::glsl::Version;
@@ -265,7 +269,7 @@ fn main() {
         "hlsl" => {
             use naga::back::hlsl;
 
-            let hlsl = hlsl::write_string(&module).unwrap_pretty();
+            let hlsl = hlsl::write_string(&module, &params.hlsl).unwrap_pretty();
             fs::write(output_path, hlsl).unwrap();
         }
         #[cfg(feature = "wgsl-out")]
